@@ -1,0 +1,6 @@
+requests
+pandas
+openpyxl
+xgboost
+scikit-learn
+streamlit
