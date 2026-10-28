@@ -17,7 +17,7 @@ logging.basicConfig(
 
 PATH_EXCEL = "quant_apostas_elite_novo.xlsx"
 DB_NAME = "quant_engine_elite.db"
-BANCA_INICIAL = 100.0
+BANCA_INICIAL_DEFAULT = 100.0
 
 try:
     import xgboost as xgb
@@ -87,13 +87,13 @@ class DatabaseManager:
             df = pd.read_sql_query("SELECT lucro_prejuizo, status, stake_kelly FROM previsoes", conn)
         
         if df.empty:
-            return BANCA_INICIAL, 0.0, 0.0, 0.0
+            return BANCA_INICIAL_DEFAULT, 0.0, 0.0, 0.0
 
         concluidas = df[df['status'].isin(['GANHO', 'PERDIDO'])].copy()
         if concluidas.empty:
-            return BANCA_INICIAL, 0.0, 0.0, 0.0
+            return BANCA_INICIAL_DEFAULT, 0.0, 0.0, 0.0
 
-        concluidas['banca_acumulada'] = BANCA_INICIAL + concluidas['lucro_prejuizo'].cumsum()
+        concluidas['banca_acumulada'] = BANCA_INICIAL_DEFAULT + concluidas['lucro_prejuizo'].cumsum()
         banca_atual = round(concluidas['banca_acumulada'].iloc[-1], 2)
         
         pico = concluidas['banca_acumulada'].cummax()
@@ -292,7 +292,7 @@ class QuantEngine:
         
         features = {
             "home_gf": st_h["home_gf"], "home_ga": st_h["home_ga"],
-            "away_gf": st_a["home_gf"], "away_ga": st_a["away_ga"], "lavg": lavg
+            "away_gf": st_a["home_gf"], "away_ga": st_a["home_ga"], "lavg": lavg
         }
         prob_ml = WalkForwardMLModel.treinar_com_walk_forward(features)
         
@@ -303,7 +303,7 @@ class QuantEngine:
         return f"{melhor[0]}-{melhor[1]}", prob_final
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5
+# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5 COM BANCA PERSISTENTE
 # ==========================================
 def atualizar_resultados_api():
     with sqlite3.connect(DB_NAME) as conn:
@@ -339,7 +339,7 @@ def atualizar_resultados_api():
                 a_api = m['awayTeam']['name']
                 
                 if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
-                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in h_pred.lower()):
                     
                     ft = m.get('score', {}).get('fullTime', {})
                     hg, ag = ft.get('home'), ft.get('away')
@@ -362,10 +362,11 @@ def executar_pipeline():
     DatabaseManager.inicializar()
     atualizar_resultados_api()
     
+    # Obtém a banca real acumulada da base de dados (evita resetar para 100€)
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (FILTRO TOP 5 PARA O DISCORD)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (BANCA PERSISTENTE & TOP 5)';^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
@@ -442,31 +443,35 @@ def executar_pipeline():
                             "Cantos Previstos": f"Est. {round(9.5 + (lc+lf-2.4)*1.5)} cantos"
                         }
                         
-                        # Guarda sempre na base de dados para o Excel
                         DatabaseManager.guardar_ou_atualizar(reg)
                         candidatos.append(reg)
         except Exception as e:
             logging.warning(f"Erro ao obter agendados {comp}: {e}")
 
-    # SELEÇÃO APENAS DOS TOP 5 JOGOS COM MAIOR PROBABILIDADE E EV
+    # SELEÇÃO DO TOP 5
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # Envia para o Discord APENAS o resumo dos 5 melhores jogos
+    # ENVIO PARA O DISCORD (COM ESTILO OTIMIZADO, TOP 5 E BANCA ATUAL)
     if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL and top_5_jogos:
-        mensagem_discord = "🔥 **ELITE QUANT - TOP 5 SELEÇÕES DA SEMANA** 🔥\n\n"
+        mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
+                           f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
+                           f"──────────────────────────────\n\n" \
+                           f"🔥 **TOP 5 SELEÇÕES DA SEMANA (Over 1.5):**\n\n"
+        
         for idx, jogo in enumerate(top_5_jogos, 1):
-            mensagem_discord += f"*{idx}.* ⚽ **{jogo['Partida']}** ({jogo['Competição']})\n" \
-                                f"   🎯 Placar: {jogo['Placar Previsto']} | Prob: {jogo['Prob Over 1.5']} | Odd: {jogo['Odd Over 1.5']}\n\n"
+            mensagem_discord += f"*{idx}* ⚽ **{jogo['Partida']}** `({jogo['Competição']})`\n" \
+                                f"     • 🎯 **Placar:** `{jogo['Placar Previsto']}` | 📈 **Prob:** `{jogo['Prob Over 1.5']}`\n" \
+                                f"     • 💶 **Odd:** `{jogo['Odd Over 1.5']}` | 💵 **Stake:** `{jogo['Stake Num']}€`\n\n"
         
         try:
             requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
-            logging.info("📤 Top 5 melhores jogos enviados com sucesso para o Discord.")
+            logging.info("📤 Relatório limpo do Top 5 e Banca enviado com sucesso para o Discord.")
         except Exception as e:
             logging.error(f"❌ Erro ao enviar para o Discord: {e}")
 
     ExcelManager.exportar_e_estilizar()
-    print("\n✅ Pipeline concluído: Excel atualizado e Top 5 enviado com sucesso para o Discord!")
+    print("\n✅ Pipeline concluído com banca persistente e relatório enviado!")
 
 if __name__ == "__main__":
     executar_pipeline()
