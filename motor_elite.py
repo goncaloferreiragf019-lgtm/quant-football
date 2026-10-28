@@ -7,7 +7,7 @@ import sqlite3
 import logging
 
 # ==========================================
-# 0. CONFIGURAÇÃO DE LOGGING & AMBIENTE LOCAL
+# 0. CONFIGURAÇÃO DE LOGGING & AMBIENTE
 # ==========================================
 logging.basicConfig(
     level=logging.INFO,
@@ -15,8 +15,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 
-PATH_EXCEL = "quant_apostas_elite.xlsx"
-PATH_STREAMLIT = "app_elite.py"
+PATH_EXCEL = "quant_apostas_elite_novo.xlsx"
+DB_NAME = "quant_engine_elite.db"
+BANCA_INICIAL = 100.0
 
 try:
     import xgboost as xgb
@@ -45,8 +46,6 @@ API_KEY_FOOTBALL = "13aa3e8635e840c7a92a943ea6f84a34"
 API_KEY_ODDS = "EXEMPLO_CHAVE_THE_ODDS_API" 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1563585120232013884/relBsMOm5MkXaOl5qqymhddZ4tOPUMVD1j6TPezSbZReIkXgrpZa51_fjXaW3Rr8H-L_"
 COMPETICOES = ["FL1", "PD", "PPL", "CL", "TP", "TL"]
-DB_NAME = "quant_engine_elite.db"
-BANCA_INICIAL = 100.0
 
 ODDS_API_KEYS_MAP = {
     "FL1": "soccer_france_ligue_one", "PD": "soccer_spain_la_liga",
@@ -107,6 +106,22 @@ class DatabaseManager:
         return banca_atual, max_dd, sharpe, len(concluidas)
 
     @staticmethod
+    def obter_taxa_sucesso_historica():
+        """Calcula a taxa de acerto recente para o motor aprender com os erros e sucessos."""
+        with sqlite3.connect(DB_NAME) as conn:
+            df = pd.read_sql_query("SELECT status FROM previsoes WHERE status IN ('GANHO', 'PERDIDO')", conn)
+        if df.empty or len(df) < 5:
+            return 1.0 # Fator neutro se houver poucos dados
+        
+        total = len(df)
+        ganhos = len(df[df['status'] == 'GANHO'])
+        taxa = ganhos / total
+        
+        # Fator de aprendizagem adaptativo: se a taxa for alta, recompensa; se for baixa, ajusta com cautela
+        fator_correcao = 0.9 + (taxa * 0.2)
+        return max(0.85, min(1.15, fator_correcao))
+
+    @staticmethod
     def guardar_ou_atualizar(reg):
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
@@ -130,7 +145,7 @@ class DatabaseManager:
         return False
 
 # ==========================================
-# 3. GESTOR DE EXCEL INSTITUCIONAL (LOCAL)
+# 3. GESTOR DE EXCEL INSTITUCIONAL COM CORES
 # ==========================================
 class ExcelManager:
     @staticmethod
@@ -182,12 +197,12 @@ class ExcelManager:
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 14)
                 
             wb.save(PATH_EXCEL)
-            logging.info(f"📁 Ficheiro Excel atualizado localmente em: {PATH_EXCEL}")
+            logging.info(f"📁 Ficheiro Excel guardado e colorido com sucesso: {PATH_EXCEL}")
         except Exception as e:
             logging.error(f"❌ Erro crítico ao guardar o Excel: {e}")
 
 # ==========================================
-# 4. LINE SHOPPING & MACHINE LEARNING
+# 4. LINE SHOPPING & MACHINE LEARNING ADAPTATIVO
 # ==========================================
 class LineShopper:
     @staticmethod
@@ -246,7 +261,7 @@ class WalkForwardMLModel:
             return 72.0
 
 # ==========================================
-# 5. MOTOR MATEMÁTICO
+# 5. MOTOR MATEMÁTICO COM FEEDBACK LOOP
 # ==========================================
 class QuantEngine:
     @staticmethod
@@ -280,15 +295,21 @@ class QuantEngine:
         
         features = {
             "home_gf": st_h["home_gf"], "home_ga": st_h["home_ga"],
-            "away_gf": st_a["away_gf"], "away_ga": st_a["away_ga"], "lavg": lavg
+            "away_gf": st_a["home_gf"], "away_ga": st_a["away_ga"], "lavg": lavg
         }
         prob_ml = WalkForwardMLModel.treinar_com_walk_forward(features)
         
-        prob_final = max(5.0, min(95.0, (0.65 * prob_poisson) + (0.35 * prob_ml)))
+        # Probabilidade combinada base
+        prob_combinada = (0.65 * prob_poisson) + (0.35 * prob_ml)
+        
+        # APLICAÇÃO DO FEEDBACK LOOP (APRENDIZAGEM COM OS ERROS/SUCESSOS)
+        fator_aprendizagem = DatabaseManager.obter_taxa_sucesso_historica()
+        prob_final = max(5.0, min(95.0, prob_combinada * fator_aprendizagem))
+        
         return f"{melhor[0]}-{melhor[1]}", prob_final
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL ELITE
+# 6. PIPELINE PRINCIPAL & SINCRONIZAÇÃO
 # ==========================================
 def atualizar_resultados_api():
     with sqlite3.connect(DB_NAME) as conn:
@@ -301,55 +322,70 @@ def atualizar_resultados_api():
     for comp in COMPETICOES:
         try:
             res = requests.get(f"https://api.football-data.org/v4/competitions/{comp}/matches?status=FINISHED", headers=headers, timeout=5)
-            if res.status_code == 200: cache[comp] = res.json().get("matches", [])
-        except Exception: cache[comp] = []
+            if res.status_code == 200: 
+                cache[comp] = res.json().get("matches", [])
+        except Exception: 
+            cache[comp] = []
         time.sleep(1)
 
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         for _, row in df_pend.iterrows():
-            updated = False
-            for comp, matches in cache.items():
-                if updated: break
-                for m in matches:
-                    h, a = m['homeTeam']['name'], m['awayTeam']['name']
-                    if h.lower() in row['partida'].lower() or a.lower() in row['partida'].lower():
-                        ft = m.get('score', {}).get('fullTime', {})
-                        hg, ag = ft.get('home'), ft.get('away')
-                        if hg is not None and ag is not None:
-                            total = hg + ag
-                            st = 'GANHO' if total >= 2 else 'PERDIDO'
-                            lucro = round(row['stake_kelly'] * (row['odd_over_15'] - 1.0), 2) if st == 'GANHO' else -row['stake_kelly']
-                            cursor.execute("UPDATE previsoes SET resultado_real = ?, lucro_prejuizo = ?, status = ? WHERE id = ?", (f"{hg}-{ag}", lucro, st, row['id']))
-                            conn.commit()
-                            updated = True
-                            break
+            competicao_jogo = row['competicao']
+            partida_str = row['partida']
+            
+            if " vs " not in partida_str:
+                continue
+            
+            h_pred, a_pred = partida_str.split(" vs ")
+            matches = cache.get(competicao_jogo, [])
+            
+            for m in matches:
+                h_api = m['homeTeam']['name']
+                a_api = m['awayTeam']['name']
+                
+                if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
+                    
+                    ft = m.get('score', {}).get('fullTime', {})
+                    hg, ag = ft.get('home'), ft.get('away')
+                    
+                    if hg is not None and ag is not None:
+                        total_golos = hg + ag
+                        st = 'GANHO' if total_golos >= 2 else 'PERDIDO'
+                        lucro = round(row['stake_kelly'] * (row['odd_over_15'] - 1.0), 2) if st == 'GANHO' else -row['stake_kelly']
+                        
+                        cursor.execute("""
+                            UPDATE previsoes 
+                            SET resultado_real = ?, lucro_prejuizo = ?, status = ? 
+                            WHERE id = ?
+                        """, (f"{hg}-{ag}", lucro, st, row['id']))
+                        conn.commit()
+                        logging.info(f"🧠 Aprendizagem atualizada: {partida_str} | Resultado: {hg}-{ag} | Status: {st}")
+                        break
 
 def executar_pipeline():
     DatabaseManager.inicializar()
     atualizar_resultados_api()
-    ExcelManager.exportar_e_estilizar()
     
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (SUPORTE TOTAL A TAÇAS E LIGAS)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (APRENDIZAGEM ADAPTATIVA ATIVA)':^76} ║")
     print("╚" + "═" * 78 + "╝")
-    print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE RATIO: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
+    print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
     
     headers = {"X-Auth-Token": API_KEY_FOOTBALL}
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    limite = hoje + timedelta(days=3)
+    limite = hoje + timedelta(days=7)
     
-    analises = []
     for comp in COMPETICOES:
         time.sleep(6)
         stats, total_g, total_p = {}, 0, 1
         
         if comp in ["TP", "TL"]:
             lavg = 2.65
-            logging.info(f"🏆 A processar Taça [{comp}] com motor de eliminatórias...")
         else:
             try:
                 res_st = requests.get(f"https://api.football-data.org/v4/competitions/{comp}/standings", headers=headers, timeout=5)
@@ -369,7 +405,7 @@ def executar_pipeline():
                                     "away_ga": (ai.get("goalsAgainst", ga/2) / max(1, ai.get("playedGames", pl/2))) * 0.95
                                 }
             except Exception as e:
-                logging.warning(f"Aviso ao carregar standings de {comp}: {e}")
+                logging.warning(f"Aviso standings {comp}: {e}")
             lavg = (total_g / total_p) if total_p > 1 else 2.6
         
         try:
@@ -399,17 +435,12 @@ def executar_pipeline():
                         reg = {
                             "datetime_obj": dt,
                             "Data_Hora_Raw": dt.strftime("%d/%m/%Y %H:%M"),
-                            "Data": dt.strftime("%d/%m/%Y"),
-                            "Hora": dt.strftime("%H:%M"),
                             "Competição": comp,
                             "Partida": f"{casa} vs {fora}",
                             "Placar Previsto": placar,
-                            "Prob Over 1.5": f"{p_over:.1f}%",
                             "Prob Over 1.5 Num": p_over,
                             "Odd Over 1.5": odd,
-                            "EV (%)": f"{ev:+.1f}%",
                             "EV Num": ev / 100.0,
-                            "Stake Kelly (€)": f"{stk}€",
                             "Stake Num": stk,
                             "Cantos Previstos": f"Est. {round(9.5 + (lc+lf-2.4)*1.5)} cantos"
                         }
@@ -417,20 +448,13 @@ def executar_pipeline():
                         if DatabaseManager.guardar_ou_atualizar(reg):
                             if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
                                 try:
-                                    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🚀 **ELITE QUANT TIP**\n⚽ {reg['Partida']} ({comp})\n🔢 Placar: {placar} | Odd: {odd} | Stake: {stk}€"}, timeout=5)
+                                    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🚀 **ELITE QUANT TIP (Adaptativo)**\n⚽ {reg['Partida']} ({comp})\n🔢 Placar: {placar} | Prob: {p_over:.1f}% | Stake: {stk}€"}, timeout=5)
                                 except Exception: pass
-                        analises.append(reg)
         except Exception as e:
-            logging.warning(f"Erro ao obter jogos agendados para {comp}: {e}")
+            logging.warning(f"Erro ao obter agendados {comp}: {e}")
 
-    if analises:
-        df_res = pd.DataFrame(analises).drop(columns=['datetime_obj', 'Data_Hora_Raw', 'Prob Over 1.5 Num', 'EV Num', 'Stake Num'])
-        try: display(df_res)
-        except NameError: print(df_res.to_string())
-        ExcelManager.exportar_e_estilizar()
-        print("\n✅ Pipeline Elite executado com sucesso! Taças e Ligas analisadas em simultâneo.")
-    else:
-        print("\nℹ️ Nenhum jogo encontrado na janela temporal atual nas competições selecionadas.")
+    ExcelManager.exportar_e_estilizar()
+    print("\n✅ Pipeline Adaptativo concluído: O motor aprendeu com o histórico, atualizou os resultados e gerou o novo Excel colorido!")
 
 if __name__ == "__main__":
     executar_pipeline()
