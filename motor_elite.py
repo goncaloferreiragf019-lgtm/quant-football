@@ -292,7 +292,7 @@ class QuantEngine:
         
         features = {
             "home_gf": st_h["home_gf"], "home_ga": st_h["home_ga"],
-            "away_gf": st_a["home_gf"], "away_ga": st_a["home_ga"], "lavg": lavg
+            "away_gf": st_a["home_gf"], "away_ga": st_a["away_ga"], "lavg": lavg
         }
         prob_ml = WalkForwardMLModel.treinar_com_walk_forward(features)
         
@@ -339,7 +339,7 @@ def atualizar_resultados_api():
                 a_api = m['awayTeam']['name']
                 
                 if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
-                   (a_pred.lower() in a_api.lower() or a_api.lower() in h_pred.lower()):
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
                     
                     ft = m.get('score', {}).get('fullTime', {})
                     hg, ag = ft.get('home'), ft.get('away')
@@ -362,11 +362,10 @@ def executar_pipeline():
     DatabaseManager.inicializar()
     atualizar_resultados_api()
     
-    # Obtém a banca real acumulada da base de dados (evita resetar para 100€)
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (BANCA PERSISTENTE & TOP 5)';^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (BANCA PERSISTENTE & TOP 5)':^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
@@ -452,7 +451,7 @@ def executar_pipeline():
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # ENVIO PARA O DISCORD (COM ESTILO OTIMIZADO, TOP 5 E BANCA ATUAL)
+    # ENVIO PARA O DISCORD
     if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL and top_5_jogos:
         mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
                            f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
