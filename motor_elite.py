@@ -40,15 +40,15 @@ except ImportError:
     from openpyxl.utils import get_column_letter
 
 # ==========================================
-# 1. CONSTANTES & CONFIGURAÇÕES ELITE
+# 1. CONSTANTES & CONFIGURAÇÕES ELITE (COM PREMIER LEAGUE)
 # ==========================================
 API_KEY_FOOTBALL = "13aa3e8635e840c7a92a943ea6f84a34"
 API_KEY_ODDS = "EXEMPLO_CHAVE_THE_ODDS_API" 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1563585120232013884/relBsMOm5MkXaOl5qqymhddZ4tOPUMVD1j6TPezSbZReIkXgrpZa51_fjXaW3Rr8H-L_"
-COMPETICOES = ["FL1", "PD", "PPL", "CL", "TP", "TL"]
+COMPETICOES = ["PL", "FL1", "PD", "PPL", "CL", "TP", "TL"]
 
 ODDS_API_KEYS_MAP = {
-    "FL1": "soccer_france_ligue_one", "PD": "soccer_spain_la_liga",
+    "PL": "soccer_epl", "FL1": "soccer_france_ligue_one", "PD": "soccer_spain_la_liga",
     "PPL": "soccer_portugal_primeira_liga", "CL": "soccer_uefa_champions_league",
     "TP": "soccer_portugal_taca_de_portugal", "TL": "soccer_portugal_taca_da_liga"
 }
@@ -339,7 +339,7 @@ def atualizar_resultados_api():
                 a_api = m['awayTeam']['name']
                 
                 if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
-                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in h_pred.lower()):
                     
                     ft = m.get('score', {}).get('fullTime', {})
                     hg, ag = ft.get('home'), ft.get('away')
@@ -365,7 +365,7 @@ def executar_pipeline():
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (BANCA PERSISTENTE & TOP 5)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (COM PREMIER LEAGUE)':^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
@@ -470,7 +470,7 @@ def executar_pipeline():
             logging.error(f"❌ Erro ao enviar para o Discord: {e}")
 
     ExcelManager.exportar_e_estilizar()
-    print("\n✅ Pipeline concluído com banca persistente e relatório enviado!")
+    print("\n✅ Pipeline concluído com Premier League, banca persistente e relatório enviado!")
 
 if __name__ == "__main__":
     executar_pipeline()
