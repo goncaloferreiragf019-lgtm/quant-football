@@ -107,17 +107,14 @@ class DatabaseManager:
 
     @staticmethod
     def obter_taxa_sucesso_historica():
-        """Calcula a taxa de acerto recente para o motor aprender com os erros e sucessos."""
         with sqlite3.connect(DB_NAME) as conn:
             df = pd.read_sql_query("SELECT status FROM previsoes WHERE status IN ('GANHO', 'PERDIDO')", conn)
         if df.empty or len(df) < 5:
-            return 1.0 # Fator neutro se houver poucos dados
+            return 1.0
         
         total = len(df)
         ganhos = len(df[df['status'] == 'GANHO'])
         taxa = ganhos / total
-        
-        # Fator de aprendizagem adaptativo: se a taxa for alta, recompensa; se for baixa, ajusta com cautela
         fator_correcao = 0.9 + (taxa * 0.2)
         return max(0.85, min(1.15, fator_correcao))
 
@@ -299,17 +296,14 @@ class QuantEngine:
         }
         prob_ml = WalkForwardMLModel.treinar_com_walk_forward(features)
         
-        # Probabilidade combinada base
         prob_combinada = (0.65 * prob_poisson) + (0.35 * prob_ml)
-        
-        # APLICAÇÃO DO FEEDBACK LOOP (APRENDIZAGEM COM OS ERROS/SUCESSOS)
         fator_aprendizagem = DatabaseManager.obter_taxa_sucesso_historica()
         prob_final = max(5.0, min(95.0, prob_combinada * fator_aprendizagem))
         
         return f"{melhor[0]}-{melhor[1]}", prob_final
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL & SINCRONIZAÇÃO
+# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5
 # ==========================================
 def atualizar_resultados_api():
     with sqlite3.connect(DB_NAME) as conn:
@@ -361,7 +355,7 @@ def atualizar_resultados_api():
                             WHERE id = ?
                         """, (f"{hg}-{ag}", lucro, st, row['id']))
                         conn.commit()
-                        logging.info(f"🧠 Aprendizagem atualizada: {partida_str} | Resultado: {hg}-{ag} | Status: {st}")
+                        logging.info(f"🧠 Sincronizado: {partida_str} | Resultado: {hg}-{ag} | Status: {st}")
                         break
 
 def executar_pipeline():
@@ -371,7 +365,7 @@ def executar_pipeline():
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (APRENDIZAGEM ADAPTATIVA ATIVA)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (FILTRO TOP 5 PARA O DISCORD)':^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
@@ -380,6 +374,7 @@ def executar_pipeline():
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     limite = hoje + timedelta(days=7)
     
+    candidatos = []
     for comp in COMPETICOES:
         time.sleep(6)
         stats, total_g, total_p = {}, 0, 1
@@ -438,23 +433,40 @@ def executar_pipeline():
                             "Competição": comp,
                             "Partida": f"{casa} vs {fora}",
                             "Placar Previsto": placar,
+                            "Prob Over 1.5": f"{p_over:.1f}%",
                             "Prob Over 1.5 Num": p_over,
                             "Odd Over 1.5": odd,
+                            "EV (%)": f"{ev:+.1f}%",
                             "EV Num": ev / 100.0,
                             "Stake Num": stk,
                             "Cantos Previstos": f"Est. {round(9.5 + (lc+lf-2.4)*1.5)} cantos"
                         }
                         
-                        if DatabaseManager.guardar_ou_atualizar(reg):
-                            if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
-                                try:
-                                    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🚀 **ELITE QUANT TIP (Adaptativo)**\n⚽ {reg['Partida']} ({comp})\n🔢 Placar: {placar} | Prob: {p_over:.1f}% | Stake: {stk}€"}, timeout=5)
-                                except Exception: pass
+                        # Guarda sempre na base de dados para o Excel
+                        DatabaseManager.guardar_ou_atualizar(reg)
+                        candidatos.append(reg)
         except Exception as e:
             logging.warning(f"Erro ao obter agendados {comp}: {e}")
 
+    # SELEÇÃO APENAS DOS TOP 5 JOGOS COM MAIOR PROBABILIDADE E EV
+    candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
+    top_5_jogos = candidatos_ordenados[:5]
+
+    # Envia para o Discord APENAS o resumo dos 5 melhores jogos
+    if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL and top_5_jogos:
+        mensagem_discord = "🔥 **ELITE QUANT - TOP 5 SELEÇÕES DA SEMANA** 🔥\n\n"
+        for idx, jogo in enumerate(top_5_jogos, 1):
+            mensagem_discord += f"*{idx}.* ⚽ **{jogo['Partida']}** ({jogo['Competição']})\n" \
+                                f"   🎯 Placar: {jogo['Placar Previsto']} | Prob: {jogo['Prob Over 1.5']} | Odd: {jogo['Odd Over 1.5']}\n\n"
+        
+        try:
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
+            logging.info("📤 Top 5 melhores jogos enviados com sucesso para o Discord.")
+        except Exception as e:
+            logging.error(f"❌ Erro ao enviar para o Discord: {e}")
+
     ExcelManager.exportar_e_estilizar()
-    print("\n✅ Pipeline Adaptativo concluído: O motor aprendeu com o histórico, atualizou os resultados e gerou o novo Excel colorido!")
+    print("\n✅ Pipeline concluído: Excel atualizado e Top 5 enviado com sucesso para o Discord!")
 
 if __name__ == "__main__":
     executar_pipeline()
