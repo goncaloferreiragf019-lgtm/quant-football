@@ -463,22 +463,28 @@ def executar_pipeline():
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL and top_5_jogos:
-        mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
-                           f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
-                           f"──────────────────────────────\n\n" \
-                           f"🔥 **TOP 5 SELEÇÕES DA SEMANA (Over 1.5):**\n\n"
-        
-        for idx, jogo in enumerate(top_5_jogos, 1):
-            mensagem_discord += f"*{idx}* ⚽ **{jogo['Partida']}** `({jogo['Competição']})`\n" \
-                                f"     • 🎯 **Placar:** `{jogo['Placar Previsto']}` | 📈 **Prob:** `{jogo['Prob Over 1.5']}`\n" \
-                                f"     • 💶 **Odd:** `{jogo['Odd Over 1.5']}` | 💵 **Stake:** `{jogo['Stake Num']}€`\n\n"
-        
+    # Bloco de envio para o Discord garantido
+    if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
+        if top_5_jogos:
+            mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
+                               f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
+                               f"──────────────────────────────\n\n" \
+                               f"🔥 **TOP 5 SELEÇÕES DA SEMANA (Over 1.5):**\n\n"
+            
+            for idx, jogo in enumerate(top_5_jogos, 1):
+                mensagem_discord += f"*{idx}* ⚽ **{jogo['Partida']}** `({jogo['Competição']})`\n" \
+                                    f"     • 🎯 **Placar:** `{jogo['Placar Previsto']}` | 📈 **Prob:** `{jogo['Prob Over 1.5']}`\n" \
+                                    f"     • 💶 **Odd:** `{jogo['Odd Over 1.5']}` | 💵 **Stake:** `{jogo['Stake Num']}€`\n\n"
+        else:
+            mensagem_discord = f"🤖 **Bot GitHub Actions Ativo!** O motor correu com sucesso, mas não encontrou novos jogos elegíveis para o Top 5 hoje (Banca: {banca:.2f}€)."
+
         try:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
-            logging.info("📤 Relatório limpo do Top 5 e Banca enviado com sucesso para o Discord.")
+            resposta = requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
+            logging.info(f"📤 Resposta do Discord: {resposta.status_code}")
         except Exception as e:
             logging.error(f"❌ Erro ao enviar para o Discord: {e}")
+    else:
+        logging.warning("⚠️ O Webhook do Discord não está configurado ou tem a chave de exemplo.")
 
     ExcelManager.exportar_e_estilizar()
     print("\n✅ Pipeline concluído com Premier League, Filtro Anti-Surpresa e relatório enviado!")
