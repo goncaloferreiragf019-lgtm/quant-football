@@ -28,6 +28,8 @@ jobs:
           pip install pandas requests openpyxl xgboost scikit-learn
 
       - name: Executar o Motor Quantitativo
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python motor_elite.py
 
