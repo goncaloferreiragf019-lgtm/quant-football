@@ -2,9 +2,11 @@ name: Automatic Quant Pipeline
 
 on:
   schedule:
-    # Corre todos os dias às 08:00 UTC (que corresponde a 09:00 em Portugal Continental)
-    - cron: '0 8 * * *'
-  workflow_dispatch: # Permite-te clicar num botão para correr manualmente sempre que quiseres
+    - cron: '0 8 * * *' # Corre todos os dias às 8h UTC (9h em Portugal)
+  workflow_dispatch:     # Permite-te correr o bot manualmente a qualquer momento
+
+permissions:
+  contents: write        # ⚠️ OBRIGATÓRIO: Permite ao bot guardar o Excel no repositório
 
 jobs:
   run-engine:
@@ -22,7 +24,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install xgboost scikit-learn openpyxl requests pandas
 
       - name: Executar o Motor Quantitativo
         run: |
           python motor_elite.py
+
+      - name: Atualizar o Excel no Repositório
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "bot@github.com"
+          git add quant_apostas_elite_novo.xlsx
+          git commit -m "Auto-update: novo excel de apostas" || exit 0
+          git push
