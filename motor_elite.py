@@ -472,5 +472,3 @@ def executar_pipeline():
     ExcelManager.exportar_e_estilizar()
     print("\n✅ Pipeline concluído com Premier League, banca persistente e relatório enviado!")
 
-if __name__ == "__main__":
-    executar_pipeline()
