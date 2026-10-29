@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 import sqlite3
 import logging
+import os
 
 # ==========================================
 # 0. CONFIGURAÇÃO DE LOGGING & AMBIENTE
@@ -18,6 +19,11 @@ logging.basicConfig(
 PATH_EXCEL = "quant_apostas_elite_novo.xlsx"
 DB_NAME = "quant_engine_elite.db"
 BANCA_INICIAL_DEFAULT = 100.0
+
+# Garantir que os ficheiros existem logo no arranque para o GitHub Actions nunca falhar no Git
+if not os.path.exists(PATH_EXCEL):
+    df_inicial = pd.DataFrame(columns=["data_jogo", "competicao", "partida", "status"])
+    df_inicial.to_excel(PATH_EXCEL, index=False, sheet_name="Elite Performance")
 
 try:
     import xgboost as xgb
@@ -40,11 +46,11 @@ except ImportError:
     from openpyxl.utils import get_column_letter
 
 # ==========================================
-# 1. CONSTANTES & CONFIGURAÇÕES ELITE (COM PREMIER LEAGUE)
+# 1. CONSTANTES & CONFIGURAÇÕES ELITE
 # ==========================================
 API_KEY_FOOTBALL = "13aa3e8635e840c7a92a943ea6f84a34"
 API_KEY_ODDS = "EXEMPLO_CHAVE_THE_ODDS_API" 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1563585120232013884/relBsMOm5MkXaOl5qqymhddZ4tOPUMVD1j6TPezSbZReIkXgrpZa51_fjXaW3Rr8H-L_"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1563585120232013884/relBsMOm5MkXaOl5qqymhddZ4tOPUMVD1j6TPezSbZReIkXgrpZa51_fjXaW3Rr8H-L_")
 COMPETICOES = ["PL", "FL1", "PD", "PPL", "CL", "TP", "TL"]
 
 ODDS_API_KEYS_MAP = {
@@ -258,7 +264,7 @@ class WalkForwardMLModel:
             return 72.0
 
 # ==========================================
-# 5. MOTOR MATEMÁTICO COM FEEDBACK LOOP
+# 5. MOTOR MATEMÁTICO COM FEEDBACK LOOP & FILTRO ANTI-SURPRESA
 # ==========================================
 class QuantEngine:
     @staticmethod
@@ -277,7 +283,7 @@ class QuantEngine:
         return max(0.0, pc * pf * corr)
 
     @staticmethod
-    def prever_partida_elite(lc, lf, st_h, st_a, lavg):
+    def prever_partida_elite(lc, lf, st_h, st_a, lavg, odd_mercado):
         placares, probs, p_u15 = [], [], 0.0
         for i in range(6):
             for j in range(6):
@@ -292,20 +298,26 @@ class QuantEngine:
         
         features = {
             "home_gf": st_h["home_gf"], "home_ga": st_h["home_ga"],
-            "away_gf": st_a["home_gf"], "away_ga": st_a["away_ga"], "lavg": lavg
+            "away_gf": st_a["home_gf"], "away_ga": st_a["home_ga"], "lavg": lavg
         }
         prob_ml = WalkForwardMLModel.treinar_com_walk_forward(features)
         
         prob_combinada = (0.65 * prob_poisson) + (0.35 * prob_ml)
         fator_aprendizagem = DatabaseManager.obter_taxa_sucesso_historica()
-        prob_final = max(5.0, min(95.0, prob_combinada * fator_aprendizagem))
+        prob_final = prob_combinada * fator_aprendizagem
         
+        implied_prob_mercado = (1.0 / odd_mercado) * 100
+        if abs(prob_final - implied_prob_mercado) > 20.0:
+            prob_final = prob_final * 0.85
+            
+        prob_final = max(5.0, min(95.0, prob_final))
         return f"{melhor[0]}-{melhor[1]}", prob_final
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5 COM BANCA PERSISTENTE
+# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5
 # ==========================================
 def atualizar_resultados_api():
+    DatabaseManager.inicializar()
     with sqlite3.connect(DB_NAME) as conn:
         df_pend = pd.read_sql_query("SELECT * FROM previsoes WHERE status = 'PENDENTE'", conn)
     if df_pend.empty:
@@ -339,7 +351,7 @@ def atualizar_resultados_api():
                 a_api = m['awayTeam']['name']
                 
                 if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
-                   (a_pred.lower() in a_api.lower() or a_api.lower() in h_pred.lower()):
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
                     
                     ft = m.get('score', {}).get('fullTime', {})
                     hg, ag = ft.get('home'), ft.get('away')
@@ -365,7 +377,7 @@ def executar_pipeline():
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (COM PREMIER LEAGUE)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (COM FILTRO ANTI-SURPRESA)':^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
@@ -418,12 +430,13 @@ def executar_pipeline():
                         lc = max(0.3, st_h["home_gf"] * st_a["away_ga"] * (lavg / 2.0))
                         lf = max(0.3, st_a["away_gf"] * st_h["home_ga"] * (lavg / 2.0))
                         
-                        placar, p_over = QuantEngine.prever_partida_elite(lc, lf, st_h, st_a, lavg)
-                        
-                        fallback_odd = round(max(1.15, 100 / (p_over * 0.95)), 2)
+                        p_temp_estimada = 75.0
+                        fallback_odd = round(max(1.15, 100 / (p_temp_estimada * 0.95)), 2)
                         odd = LineShopper.obter_melhor_odd(comp, casa, fora, fallback_odd)
-                        ev = round(((p_over / 100.0) * odd - 1.0) * 100, 2)
                         
+                        placar, p_over = QuantEngine.prever_partida_elite(lc, lf, st_h, st_a, lavg, odd)
+                        
+                        ev = round(((p_over / 100.0) * odd - 1.0) * 100, 2)
                         kelly_f = ((p_over/100.0) * (odd - 1.0) - (1.0 - (p_over/100.0))) / (odd - 1.0)
                         stk = round(max(1.0, banca * max(0.0, kelly_f) * 0.1), 2)
                         
@@ -447,11 +460,9 @@ def executar_pipeline():
         except Exception as e:
             logging.warning(f"Erro ao obter agendados {comp}: {e}")
 
-    # SELEÇÃO DO TOP 5
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # ENVIO PARA O DISCORD
     if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL and top_5_jogos:
         mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
                            f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
@@ -470,5 +481,7 @@ def executar_pipeline():
             logging.error(f"❌ Erro ao enviar para o Discord: {e}")
 
     ExcelManager.exportar_e_estilizar()
-    print("\n✅ Pipeline concluído com Premier League, banca persistente e relatório enviado!")
+    print("\n✅ Pipeline concluído com Premier League, Filtro Anti-Surpresa e relatório enviado!")
 
+if __name__ == "__main__":
+    executar_pipeline()
