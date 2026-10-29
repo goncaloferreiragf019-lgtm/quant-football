@@ -15,7 +15,7 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
         with:
-          persist-credentials: true # Crucial para permitir o git push autenticado
+          persist-credentials: true
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -36,11 +36,7 @@ jobs:
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "bot@github.com"
           
-          # Adiciona tanto o Excel como a Base de Dados para manter a banca persistente entre dias
           git add quant_apostas_elite_novo.xlsx quant_engine_elite.db
           
-          # Faz commit apenas se houver alterações
           git diff --staged --quiet || git commit -m "Auto-update: excel e base de dados quant"
-          
-          # Faz push de volta para o repositório
-          git push
+          git push || exit 0
