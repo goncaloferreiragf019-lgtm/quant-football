@@ -20,7 +20,7 @@ PATH_EXCEL = "quant_apostas_elite_novo.xlsx"
 DB_NAME = "quant_engine_elite.db"
 BANCA_INICIAL_DEFAULT = 100.0
 
-# Garantir que os ficheiros existem logo no arranque para o GitHub Actions nunca falhar no Git
+# Garantir que os ficheiros existem logo no arranque para o GitHub Actions nunca falhar
 if not os.path.exists(PATH_EXCEL):
     df_inicial = pd.DataFrame(columns=["data_jogo", "competicao", "partida", "status"])
     df_inicial.to_excel(PATH_EXCEL, index=False, sheet_name="Elite Performance")
@@ -148,7 +148,7 @@ class DatabaseManager:
         return False
 
 # ==========================================
-# 3. GESTOR DE EXCEL INSTITUCIONAL COM CORES
+# 3. GESTOR DE EXCEL COM CORES AUTOMÁTICAS
 # ==========================================
 class ExcelManager:
     @staticmethod
@@ -205,7 +205,7 @@ class ExcelManager:
             logging.error(f"❌ Erro crítico ao guardar o Excel: {e}")
 
 # ==========================================
-# 4. LINE SHOPPING & MACHINE LEARNING ADAPTATIVO
+# 4. LINE SHOPPING & MACHINE LEARNING
 # ==========================================
 class LineShopper:
     @staticmethod
@@ -264,7 +264,7 @@ class WalkForwardMLModel:
             return 72.0
 
 # ==========================================
-# 5. MOTOR MATEMÁTICO COM FEEDBACK LOOP & FILTRO ANTI-SURPRESA
+# 5. MOTOR MATEMÁTICO & PREVISÃO
 # ==========================================
 class QuantEngine:
     @staticmethod
@@ -314,7 +314,7 @@ class QuantEngine:
         return f"{melhor[0]}-{melhor[1]}", prob_final
 
 # ==========================================
-# 6. PIPELINE PRINCIPAL & SELEÇÃO DO TOP 5
+# 6. PIPELINE & SINCRONIZAÇÃO DE RESULTADOS
 # ==========================================
 def atualizar_resultados_api():
     DatabaseManager.inicializar()
@@ -377,14 +377,14 @@ def executar_pipeline():
     banca, max_dd, sharpe, total_apostas = DatabaseManager.obter_metricas_banca()
     
     print("\n" + "╔" + "═" * 78 + "╗")
-    print(f"║ {'🤖 ELITE QUANT TERMINAL (COM FILTRO ANTI-SURPRESA)':^76} ║")
+    print(f"║ {'🤖 ELITE QUANT TERMINAL (TOP 5 DO DIA)':^76} ║")
     print("╚" + "═" * 78 + "╝")
     print(f"  💰 BANCA ATUAL: {banca:.2f}€ | 📉 MAX DRAWDOWN: {max_dd}% | ⚡ SHARPE: {sharpe} | 📊 TOTAL: {total_apostas} apostas")
     print("─" * 80)
     
     headers = {"X-Auth-Token": API_KEY_FOOTBALL}
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    limite = hoje + timedelta(days=7)
+    limite = hoje + timedelta(days=1)
     
     candidatos = []
     for comp in COMPETICOES:
@@ -463,20 +463,22 @@ def executar_pipeline():
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # Bloco de envio para o Discord garantido
+    # Envio para o Discord com o Top 5 do dia
     if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
+        data_hoje_str = datetime.now().strftime("%d/%m/%Y")
         if top_5_jogos:
-            mensagem_discord = f"🚀 **ELITE QUANT // RELATÓRIO SEMANAL** 🚀\n" \
-                               f"💰 **Banca Atual:** `{banca:.2f}€` | 📊 **Total Apostas:** `{total_apostas}`\n" \
-                               f"──────────────────────────────\n\n" \
-                               f"🔥 **TOP 5 SELEÇÕES DA SEMANA (Over 1.5):**\n\n"
+            mensagem_discord = f"🎯 **ELITE QUANT // TOP 5 APOSTAS DO DIA** 🎯\n" \
+                               f"📅 **Data:** `{data_hoje_str}` | 💰 **Banca:** `{banca:.2f}€`\n" \
+                               f"──────────────────────────────\n\n"
             
             for idx, jogo in enumerate(top_5_jogos, 1):
                 mensagem_discord += f"*{idx}* ⚽ **{jogo['Partida']}** `({jogo['Competição']})`\n" \
+                                    f"     • 🕒 **Hora:** `{jogo['Data_Hora_Raw'].split(' ')[1]}`\n" \
                                     f"     • 🎯 **Placar:** `{jogo['Placar Previsto']}` | 📈 **Prob:** `{jogo['Prob Over 1.5']}`\n" \
                                     f"     • 💶 **Odd:** `{jogo['Odd Over 1.5']}` | 💵 **Stake:** `{jogo['Stake Num']}€`\n\n"
         else:
-            mensagem_discord = f"🤖 **Bot GitHub Actions Ativo!** O motor correu com sucesso, mas não encontrou novos jogos elegíveis para o Top 5 hoje (Banca: {banca:.2f}€)."
+            mensagem_discord = f"🤖 **Elite Quant // Relatório Diário ({data_hoje_str})**\n" \
+                               f"O motor correu com sucesso, mas não existem jogos elegíveis para o Top 5 de Over 1.5 para hoje."
 
         try:
             resposta = requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
@@ -487,7 +489,7 @@ def executar_pipeline():
         logging.warning("⚠️ O Webhook do Discord não está configurado ou tem a chave de exemplo.")
 
     ExcelManager.exportar_e_estilizar()
-    print("\n✅ Pipeline concluído com Premier League, Filtro Anti-Surpresa e relatório enviado!")
+    print("\n✅ Pipeline concluído com sucesso!")
 
 if __name__ == "__main__":
     executar_pipeline()
