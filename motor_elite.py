@@ -50,7 +50,8 @@ except ImportError:
 # ==========================================
 API_KEY_FOOTBALL = "13aa3e8635e840c7a92a943ea6f84a34"
 API_KEY_ODDS = "EXEMPLO_CHAVE_THE_ODDS_API" 
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1563585120232013884/relBsMOm5MkXaOl5qqymhddZ4tOPUMVD1j6TPezSbZReIkXgrpZa51_fjXaW3Rr8H-L_")
+# Novo Webhook do Discord integrado diretamente
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1566417863831461901/q19GYfqx2YHqHHpS53WlFf9n-VZ6FbbydqEW7yhudxLm1R3FmSE6GI2QRCBcCgQyfzry")
 COMPETICOES = ["PL", "FL1", "PD", "PPL", "CL", "TP", "TL"]
 
 ODDS_API_KEYS_MAP = {
@@ -384,7 +385,7 @@ def executar_pipeline():
     
     headers = {"X-Auth-Token": API_KEY_FOOTBALL}
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    limite = hoje + timedelta(days=7)  # Alargado para 7 dias para garantir que apanha sempre jogos no Top 5
+    limite = hoje + timedelta(days=7)
     
     candidatos = []
     for comp in COMPETICOES:
@@ -463,18 +464,8 @@ def executar_pipeline():
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # Envio para o Discord com o Top 5
-# Bloco de teste forçado para o Discord
-    data_hoje_str = datetime.now().strftime("%d/%m/%Y")
-    mensagem_discord = f"🧪 **TESTE DE DIAGNÓSTICO ELITE QUANT** 🧪\nData: {data_hoje_str} | Banca: {banca:.2f}€"
-
-    print(f"A tentar enviar para o Discord o webhook: {DISCORD_WEBHOOK_URL[:30]}...")
-
-    try:
-        resposta = requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
-        print(f"RESPOSTA DO DISCORD -> Código: {resposta.status_code} | Corpo: {resposta.text}")
-    except Exception as e:
-        print(f"ERRO CRÍTICO NO REQUEST DO DISCORD: {e}")
+    # Envio para o Discord com o novo Webhook
+    if DISCORD_WEBHOOK_URL:
         data_hoje_str = datetime.now().strftime("%d/%m/%Y")
         if top_5_jogos:
             mensagem_discord = f"🎯 **ELITE QUANT // TOP 5 APOSTAS** 🎯\n" \
@@ -495,8 +486,6 @@ def executar_pipeline():
             logging.info(f"📤 Resposta do Discord: {resposta.status_code}")
         except Exception as e:
             logging.error(f"❌ Erro ao enviar para o Discord: {e}")
-    else:
-        logging.warning("⚠️ O Webhook do Discord não está configurado ou tem a chave de exemplo.")
 
     ExcelManager.exportar_e_estilizar()
     print("\n✅ Pipeline concluído com sucesso!")
