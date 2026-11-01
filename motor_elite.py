@@ -464,7 +464,17 @@ def executar_pipeline():
     top_5_jogos = candidatos_ordenados[:5]
 
     # Envio para o Discord com o Top 5
-    if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
+# Bloco de teste forçado para o Discord
+    data_hoje_str = datetime.now().strftime("%d/%m/%Y")
+    mensagem_discord = f"🧪 **TESTE DE DIAGNÓSTICO ELITE QUANT** 🧪\nData: {data_hoje_str} | Banca: {banca:.2f}€"
+
+    print(f"A tentar enviar para o Discord o webhook: {DISCORD_WEBHOOK_URL[:30]}...")
+
+    try:
+        resposta = requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
+        print(f"RESPOSTA DO DISCORD -> Código: {resposta.status_code} | Corpo: {resposta.text}")
+    except Exception as e:
+        print(f"ERRO CRÍTICO NO REQUEST DO DISCORD: {e}")
         data_hoje_str = datetime.now().strftime("%d/%m/%Y")
         if top_5_jogos:
             mensagem_discord = f"🎯 **ELITE QUANT // TOP 5 APOSTAS** 🎯\n" \
