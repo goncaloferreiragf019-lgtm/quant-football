@@ -351,7 +351,7 @@ def atualizar_resultados_api():
                 a_api = m['awayTeam']['name']
                 
                 if (h_pred.lower() in h_api.lower() or h_api.lower() in h_pred.lower()) and \
-                   (a_pred.lower() in a_api.lower() or a_api.lower() in a_pred.lower()):
+                   (a_pred.lower() in a_api.lower() or a_api.lower() in h_pred.lower()):
                     
                     ft = m.get('score', {}).get('fullTime', {})
                     hg, ag = ft.get('home'), ft.get('away')
@@ -384,7 +384,7 @@ def executar_pipeline():
     
     headers = {"X-Auth-Token": API_KEY_FOOTBALL}
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-   limite = hoje + timedelta(days=7)
+    limite = hoje + timedelta(days=7)  # Alargado para 7 dias para garantir que apanha sempre jogos no Top 5
     
     candidatos = []
     for comp in COMPETICOES:
@@ -463,22 +463,22 @@ def executar_pipeline():
     candidatos_ordenados = sorted(candidatos, key=lambda x: (x['Prob Over 1.5 Num'], x['EV Num']), reverse=True)
     top_5_jogos = candidatos_ordenados[:5]
 
-    # Envio para o Discord com o Top 5 do dia
+    # Envio para o Discord com o Top 5
     if DISCORD_WEBHOOK_URL and "EXEMPLO" not in DISCORD_WEBHOOK_URL:
         data_hoje_str = datetime.now().strftime("%d/%m/%Y")
         if top_5_jogos:
-            mensagem_discord = f"🎯 **ELITE QUANT // TOP 5 APOSTAS DO DIA** 🎯\n" \
-                               f"📅 **Data:** `{data_hoje_str}` | 💰 **Banca:** `{banca:.2f}€`\n" \
+            mensagem_discord = f"🎯 **ELITE QUANT // TOP 5 APOSTAS** 🎯\n" \
+                               f"📅 **Data Execução:** `{data_hoje_str}` | 💰 **Banca:** `{banca:.2f}€`\n" \
                                f"──────────────────────────────\n\n"
             
             for idx, jogo in enumerate(top_5_jogos, 1):
                 mensagem_discord += f"*{idx}* ⚽ **{jogo['Partida']}** `({jogo['Competição']})`\n" \
-                                    f"     • 🕒 **Hora:** `{jogo['Data_Hora_Raw'].split(' ')[1]}`\n" \
+                                    f"     • 🕒 **Data/Hora:** `{jogo['Data_Hora_Raw']}`\n" \
                                     f"     • 🎯 **Placar:** `{jogo['Placar Previsto']}` | 📈 **Prob:** `{jogo['Prob Over 1.5']}`\n" \
                                     f"     • 💶 **Odd:** `{jogo['Odd Over 1.5']}` | 💵 **Stake:** `{jogo['Stake Num']}€`\n\n"
         else:
             mensagem_discord = f"🤖 **Elite Quant // Relatório Diário ({data_hoje_str})**\n" \
-                               f"O motor correu com sucesso, mas não existem jogos elegíveis para o Top 5 de Over 1.5 para hoje."
+                               f"O motor correu com sucesso, mas não existem jogos elegíveis para o Top 5 no momento."
 
         try:
             resposta = requests.post(DISCORD_WEBHOOK_URL, json={"content": mensagem_discord}, timeout=5)
