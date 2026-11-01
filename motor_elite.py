@@ -384,7 +384,7 @@ def executar_pipeline():
     
     headers = {"X-Auth-Token": API_KEY_FOOTBALL}
     hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    limite = hoje + timedelta(days=1)
+   limite = hoje + timedelta(days=7)
     
     candidatos = []
     for comp in COMPETICOES:
